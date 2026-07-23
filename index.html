@@ -39,7 +39,8 @@
         }
         if (u.grafico) {
           popup += '<br><img src="' + u.grafico + '?t=' + Date.now() + '" ' +
-            'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;">';
+            'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;" ' +
+            'onerror="this.style.display=\'none\'">';
         }
         L.marker([u.lat, u.lon]).addTo(map).bindPopup(popup, { maxWidth: 260 });
         bounds.push([u.lat, u.lon]);
