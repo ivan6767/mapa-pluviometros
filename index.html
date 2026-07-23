@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Red de Pluviometros</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style> html, body, #map { height: 100%; margin: 0; padding: 0; } </style>
 </head>
@@ -11,6 +12,14 @@
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+  // Necesario para que Telegram muestre bien la pagina como Mini App
+  // (sin esto puede quedar en blanco dentro de la app, aunque en un
+  // navegador normal funcione bien).
+  if (window.Telegram && window.Telegram.WebApp) {
+    window.Telegram.WebApp.ready();
+    window.Telegram.WebApp.expand();
+  }
+
   var map = L.map('map').setView([-24.78, -65.41], 6);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
@@ -22,7 +31,17 @@
     .then(function(usuarios) {
       var bounds = [];
       usuarios.forEach(function(u) {
-        L.marker([u.lat, u.lon]).addTo(map).bindPopup(u.nombre);
+        var popup = '<b>' + u.nombre + '</b><br>' +
+          'Registros: ' + u.registros + '<br>' +
+          'Acumulado: ' + u.totalMm + ' mm';
+        if (u.registros > 0) {
+          popup += '<br>Ultimo: ' + u.ultimaFecha + ' — ' + u.ultimoMm + ' mm';
+        }
+        if (u.grafico) {
+          popup += '<br><img src="' + u.grafico + '?t=' + Date.now() + '" ' +
+            'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;">';
+        }
+        L.marker([u.lat, u.lon]).addTo(map).bindPopup(popup, { maxWidth: 260 });
         bounds.push([u.lat, u.lon]);
       });
       if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
