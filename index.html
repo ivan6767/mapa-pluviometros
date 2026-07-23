@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Red de Pluviometros</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style> html, body, #map { height: 100%; margin: 0; padding: 0; } </style>
+</head>
+<body>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  var map = L.map('map').setView([-24.78, -65.41], 6);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  fetch('usuarios.json?t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(usuarios) {
+      var bounds = [];
+      usuarios.forEach(function(u) {
+        L.marker([u.lat, u.lon]).addTo(map).bindPopup(u.nombre);
+        bounds.push([u.lat, u.lon]);
+      });
+      if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
+    })
+    .catch(function(err) { console.error('No se pudo cargar usuarios.json', err); });
+</script>
+</body>
+</html>
