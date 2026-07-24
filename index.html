@@ -44,7 +44,13 @@
     line-height: 1; cursor: pointer; user-select: none;
   }
 
-  .popup-mini-chart { max-width: 240px; margin-top: 6px; border-radius: 6px; display: block; cursor: zoom-in; }
+  /* Ancho y alto FIJOS (mismo ratio 1000x680 del generador de graficos): el
+     espacio queda reservado desde que se abre el popup, asi no cambia de
+     tamano un rato despues cuando la imagen termina de bajar de GitHub. */
+  .popup-mini-chart {
+    width: 240px; height: 163px; margin: 6px auto 0; border-radius: 6px; display: block;
+    cursor: zoom-in; object-fit: contain; background: #ebebe8;
+  }
   .fila-acciones { display: flex; gap: 8px; margin-top: 8px; }
   .fila-acciones button {
     flex: 1; border: none; border-radius: 14px; padding: 6px 8px; font-size: 12.5px;
@@ -129,7 +135,7 @@
     return '<div class="actualizado">Ultimo registro: ' + texto + '</div>';
   }
 
-  function armarPopup(u) {
+  function armarPopup(u, imgUrl) {
     var popup = '<b>' + u.nombre + '</b><br>' +
       'Registros: ' + u.registros + '<br>' +
       'Acumulado: ' + u.totalMm + ' mm';
@@ -138,8 +144,7 @@
       popup += '<br>' + tendenciaHtml(u.mesActual || 0, u.mesAnterior || 0);
       popup += actualizadoHaceHtml(u.ultimaFecha);
     }
-    if (u.grafico) {
-      var imgUrl = RAW_BASE + u.grafico + '?t=' + Date.now();
+    if (imgUrl) {
       popup += '<img class="popup-mini-chart" src="' + imgUrl + '" ' +
         'onclick="abrirLightbox(\'' + imgUrl + '\')" ' +
         'onerror="this.style.display=\'none\'">';
@@ -149,6 +154,17 @@
       '</div>';
     return popup;
   }
+
+  // Firma con los datos que realmente importan para el popup: si nada de
+  // esto cambio desde la ultima vez, no hace falta tocar el popup ni el
+  // icono ni volver a bajar la imagen del grafico (evita el parpadeo/resize
+  // cada 8 segundos aunque no haya novedades).
+  function firmaDe(u) {
+    return [u.registros, u.totalMm, u.ultimaFecha, u.ultimoMm, u.mesActual, u.mesAnterior, u.grafico].join('|');
+  }
+
+  var firmas = {};   // key -> ultima firma aplicada al popup/icono
+  var imgUrls = {};  // key -> url de la imagen ya usada (se mantiene mientras no cambien los datos)
 
   function cargarUsuarios() {
     fetch(RAW_BASE + 'usuarios.json?t=' + Date.now())
@@ -160,19 +176,27 @@
           var key = u.nombre + '_' + u.lat + '_' + u.lon; // clave simple por persona
           vistos[key] = true;
           datosUsuarios[key] = u;
+          bounds.push([u.lat, u.lon]);
 
-          var popup = armarPopup(u);
-          var icono = pinIcono(u.totalMm);
+          var firmaNueva = firmaDe(u);
 
           if (markers[key]) {
-            // Ya existe el pin: solo se actualiza el popup y el color, no se duplica el marcador.
-            markers[key].setPopupContent(popup);
-            markers[key].setIcon(icono);
+            // Ya existe el pin: si no cambio nada, no se toca (evita parpadeos).
+            if (firmas[key] === firmaNueva) return;
+
+            if (u.grafico) imgUrls[key] = RAW_BASE + u.grafico + '?t=' + Date.now();
+            else delete imgUrls[key];
+
+            markers[key].setPopupContent(armarPopup(u, imgUrls[key]));
+            markers[key].setIcon(pinIcono(u.totalMm));
+            firmas[key] = firmaNueva;
           } else {
-            markers[key] = L.marker([u.lat, u.lon], { icon: icono }).bindPopup(popup, { maxWidth: 260 });
+            if (u.grafico) imgUrls[key] = RAW_BASE + u.grafico + '?t=' + Date.now();
+            markers[key] = L.marker([u.lat, u.lon], { icon: pinIcono(u.totalMm) })
+              .bindPopup(armarPopup(u, imgUrls[key]), { maxWidth: 260 });
             clusterGroup.addLayer(markers[key]);
+            firmas[key] = firmaNueva;
           }
-          bounds.push([u.lat, u.lon]);
         });
 
         // Si alguien fue borrado del todo (perfil eliminado), se le saca el pin.
@@ -181,6 +205,8 @@
             clusterGroup.removeLayer(markers[key]);
             delete markers[key];
             delete datosUsuarios[key];
+            delete firmas[key];
+            delete imgUrls[key];
           }
         });
 
