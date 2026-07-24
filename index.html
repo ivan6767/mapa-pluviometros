@@ -26,28 +26,61 @@
     maxZoom: 19
   }).addTo(map);
 
-  fetch('usuarios.json?t=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(usuarios) {
-      var bounds = [];
-      usuarios.forEach(function(u) {
-        var popup = '<b>' + u.nombre + '</b><br>' +
-          'Registros: ' + u.registros + '<br>' +
-          'Acumulado: ' + u.totalMm + ' mm';
-        if (u.registros > 0) {
-          popup += '<br>Ultimo: ' + u.ultimaFecha + ' — ' + u.ultimoMm + ' mm';
+  var markers = {};      // chatId (o indice) -> marker, para no duplicar pines
+  var primeraCarga = true;
+
+  function cargarUsuarios() {
+    fetch('usuarios.json?t=' + Date.now())
+      .then(function(r) { return r.json(); })
+      .then(function(usuarios) {
+        var bounds = [];
+        var vistos = {};
+        usuarios.forEach(function(u, i) {
+          var key = u.nombre + '_' + u.lat + '_' + u.lon; // clave simple por persona
+          vistos[key] = true;
+
+          var popup = '<b>' + u.nombre + '</b><br>' +
+            'Registros: ' + u.registros + '<br>' +
+            'Acumulado: ' + u.totalMm + ' mm';
+          if (u.registros > 0) {
+            popup += '<br>Ultimo: ' + u.ultimaFecha + ' — ' + u.ultimoMm + ' mm';
+          }
+          if (u.grafico) {
+            popup += '<br><img src="' + u.grafico + '?t=' + Date.now() + '" ' +
+              'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;" ' +
+              'onerror="this.style.display=\'none\'">';
+          }
+
+          if (markers[key]) {
+            // Ya existe el pin: solo se actualiza el popup, no se duplica el marcador.
+            markers[key].setPopupContent(popup);
+          } else {
+            markers[key] = L.marker([u.lat, u.lon]).addTo(map).bindPopup(popup, { maxWidth: 260 });
+          }
+          bounds.push([u.lat, u.lon]);
+        });
+
+        // Si alguien fue borrado del todo (perfil eliminado), se le saca el pin.
+        Object.keys(markers).forEach(function(key) {
+          if (!vistos[key]) {
+            map.removeLayer(markers[key]);
+            delete markers[key];
+          }
+        });
+
+        if (primeraCarga && bounds.length > 0) {
+          map.fitBounds(bounds, { padding: [40, 40] });
+          primeraCarga = false;
         }
-        if (u.grafico) {
-          popup += '<br><img src="' + u.grafico + '?t=' + Date.now() + '" ' +
-            'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;" ' +
-            'onerror="this.style.display=\'none\'">';
-        }
-        L.marker([u.lat, u.lon]).addTo(map).bindPopup(popup, { maxWidth: 260 });
-        bounds.push([u.lat, u.lon]);
-      });
-      if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
-    })
-    .catch(function(err) { console.error('No se pudo cargar usuarios.json', err); });
+      })
+      .catch(function(err) { console.error('No se pudo cargar usuarios.json', err); });
+  }
+
+  cargarUsuarios();
+  setInterval(cargarUsuarios, 15000); // se refresca sola cada 15 segundos
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) cargarUsuarios(); // y al volver a primer plano
+  });
 </script>
 </body>
 </html>
