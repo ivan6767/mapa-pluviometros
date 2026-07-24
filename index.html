@@ -26,11 +26,13 @@
     maxZoom: 19
   }).addTo(map);
 
+  var RAW_BASE = 'https://raw.githubusercontent.com/ivan6767/mapa-pluviometros/main/'; // datos servidos directo desde GitHub, sin pasar por el build de Pages
+
   var markers = {};      // chatId (o indice) -> marker, para no duplicar pines
   var primeraCarga = true;
 
   function cargarUsuarios() {
-    fetch('usuarios.json?t=' + Date.now())
+    fetch(RAW_BASE + 'usuarios.json?t=' + Date.now())
       .then(function(r) { return r.json(); })
       .then(function(usuarios) {
         var bounds = [];
@@ -46,7 +48,7 @@
             popup += '<br>Ultimo: ' + u.ultimaFecha + ' — ' + u.ultimoMm + ' mm';
           }
           if (u.grafico) {
-            popup += '<br><img src="' + u.grafico + '?t=' + Date.now() + '" ' +
+            popup += '<br><img src="' + RAW_BASE + u.grafico + '?t=' + Date.now() + '" ' +
               'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;" ' +
               'onerror="this.style.display=\'none\'">';
           }
@@ -77,7 +79,7 @@
   }
 
   cargarUsuarios();
-  setInterval(cargarUsuarios, 15000); // se refresca sola cada 15 segundos
+  setInterval(cargarUsuarios, 8000); // se refresca sola cada 8 segundos
   document.addEventListener('visibilitychange', function() {
     if (!document.hidden) cargarUsuarios(); // y al volver a primer plano
   });
