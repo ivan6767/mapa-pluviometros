@@ -6,19 +6,73 @@
 <title>Red de Pluviometros</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<style> html, body, #map { height: 100%; margin: 0; padding: 0; } </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  html, body, #map { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Roboto, Arial, sans-serif; }
+
+  /* ── Buscador flotante ─────────────────────────────────────────────── */
+  #buscador {
+    position: absolute; top: 10px; left: 50px; right: 50px; z-index: 1000;
+  }
+  #buscador input {
+    width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 20px;
+    border: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); font-size: 15px; outline: none;
+  }
+  #resultados {
+    background: white; border-radius: 10px; margin-top: 4px; max-height: 160px;
+    overflow-y: auto; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: none;
+  }
+  #resultados div { padding: 8px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
+  #resultados div:last-child { border-bottom: none; }
+
+  /* ── Boton flotante "Cargar registro" ───────────────────────────────── */
+  #btnCargar {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: #2f8ca8; color: white; border: none; border-radius: 24px;
+    padding: 12px 22px; font-size: 15px; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+
+  /* ── Lightbox del grafico ─────────────────────────────────────────── */
+  #lightbox {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    z-index: 2000; align-items: center; justify-content: center;
+  }
+  #lightbox img { max-width: 94vw; max-height: 88vh; border-radius: 8px; }
+  #lightbox .cerrar {
+    position: absolute; top: 16px; right: 20px; color: white; font-size: 32px;
+    line-height: 1; cursor: pointer; user-select: none;
+  }
+
+  .popup-mini-chart { max-width: 240px; margin-top: 6px; border-radius: 6px; display: block; cursor: zoom-in; }
+  .fila-acciones { display: flex; gap: 8px; margin-top: 8px; }
+  .fila-acciones button {
+    flex: 1; border: none; border-radius: 14px; padding: 6px 8px; font-size: 12.5px;
+    background: #eef3f2; color: #1c4a35; font-weight: bold;
+  }
+  .tendencia-up { color: #d24d4d; font-weight: bold; }
+  .tendencia-down { color: #2f9e5c; font-weight: bold; }
+  .tendencia-flat { color: #888; }
+  .actualizado { color: #888; font-size: 12px; margin-top: 4px; }
+</style>
 </head>
 <body>
+<div id="buscador">
+  <input id="inputBuscar" type="text" placeholder="Buscar estacion por nombre..." autocomplete="off">
+  <div id="resultados"></div>
+</div>
 <div id="map"></div>
+<button id="btnCargar">🌧 Cargar mi registro</button>
+<div id="lightbox"><span class="cerrar" onclick="cerrarLightbox()">×</span><img id="lightboxImg" src=""></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
   // Necesario para que Telegram muestre bien la pagina como Mini App
   // (sin esto puede quedar en blanco dentro de la app, aunque en un
   // navegador normal funcione bien).
-  if (window.Telegram && window.Telegram.WebApp) {
-    window.Telegram.WebApp.ready();
-    window.Telegram.WebApp.expand();
-  }
+  var tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+  if (tg) { tg.ready(); tg.expand(); }
 
   var map = L.map('map').setView([-24.78, -65.41], 6);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -26,10 +80,75 @@
     maxZoom: 19
   }).addTo(map);
 
+  var clusterGroup = L.markerClusterGroup({ maxClusterRadius: 45 });
+  map.addLayer(clusterGroup);
+
   var RAW_BASE = 'https://raw.githubusercontent.com/ivan6767/mapa-pluviometros/main/'; // datos servidos directo desde GitHub, sin pasar por el build de Pages
 
-  var markers = {};      // chatId (o indice) -> marker, para no duplicar pines
+  var markers = {};      // key -> marker, para no duplicar pines
+  var datosUsuarios = {}; // key -> ultimo dato crudo, para el buscador
   var primeraCarga = true;
+
+  // ── Color del pin segun cuanto llovio (acumulado 12 meses) ──────────────
+  function colorPorAcumulado(mm) {
+    if (mm <= 0) return '#9aa0a6';   // gris: sin registros
+    if (mm < 10) return '#4fa96b';   // verde: poco
+    if (mm < 30) return '#e0a83e';   // amarillo: moderado
+    return '#d24d4d';                // rojo: alto
+  }
+
+  function pinIcono(mm) {
+    var color = colorPorAcumulado(mm);
+    return L.divIcon({
+      className: '',
+      html: '<div style="background:' + color + ';width:22px;height:22px;border-radius:50% 50% 50% 0;' +
+        'transform:rotate(-45deg);border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.5);"></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 22],
+      popupAnchor: [0, -22]
+    });
+  }
+
+  // ── Tendencia: mes actual vs mes anterior ────────────────────────────────
+  function tendenciaHtml(actual, anterior) {
+    if (actual <= 0 && anterior <= 0) return '';
+    if (actual > anterior) return '<span class="tendencia-up">▲ subiendo</span> respecto al mes pasado';
+    if (actual < anterior) return '<span class="tendencia-down">▼ bajando</span> respecto al mes pasado';
+    return '<span class="tendencia-flat">→ igual</span> que el mes pasado';
+  }
+
+  // ── "Actualizado hace X": intenta parsear dd/mm/yyyy ────────────────────
+  function actualizadoHaceHtml(fecha) {
+    if (!fecha) return '';
+    var partes = fecha.split('/');
+    if (partes.length !== 3) return '';
+    var d = new Date(partes[2], partes[1] - 1, partes[0]);
+    if (isNaN(d.getTime())) return '';
+    var dias = Math.floor((Date.now() - d.getTime()) / 86400000);
+    var texto = dias <= 0 ? 'hoy' : (dias === 1 ? 'hace 1 dia' : 'hace ' + dias + ' dias');
+    return '<div class="actualizado">Ultimo registro: ' + texto + '</div>';
+  }
+
+  function armarPopup(u) {
+    var popup = '<b>' + u.nombre + '</b><br>' +
+      'Registros: ' + u.registros + '<br>' +
+      'Acumulado: ' + u.totalMm + ' mm';
+    if (u.registros > 0) {
+      popup += '<br>Ultimo: ' + u.ultimaFecha + ' — ' + u.ultimoMm + ' mm';
+      popup += '<br>' + tendenciaHtml(u.mesActual || 0, u.mesAnterior || 0);
+      popup += actualizadoHaceHtml(u.ultimaFecha);
+    }
+    if (u.grafico) {
+      var imgUrl = RAW_BASE + u.grafico + '?t=' + Date.now();
+      popup += '<img class="popup-mini-chart" src="' + imgUrl + '" ' +
+        'onclick="abrirLightbox(\'' + imgUrl + '\')" ' +
+        'onerror="this.style.display=\'none\'">';
+    }
+    popup += '<div class="fila-acciones">' +
+      '<button onclick="compartirEstacion(\'' + u.nombre.replace(/'/g, "\\'") + '\',' + u.totalMm + ')">📤 Compartir</button>' +
+      '</div>';
+    return popup;
+  }
 
   function cargarUsuarios() {
     fetch(RAW_BASE + 'usuarios.json?t=' + Date.now())
@@ -40,24 +159,18 @@
         usuarios.forEach(function(u, i) {
           var key = u.nombre + '_' + u.lat + '_' + u.lon; // clave simple por persona
           vistos[key] = true;
+          datosUsuarios[key] = u;
 
-          var popup = '<b>' + u.nombre + '</b><br>' +
-            'Registros: ' + u.registros + '<br>' +
-            'Acumulado: ' + u.totalMm + ' mm';
-          if (u.registros > 0) {
-            popup += '<br>Ultimo: ' + u.ultimaFecha + ' — ' + u.ultimoMm + ' mm';
-          }
-          if (u.grafico) {
-            popup += '<br><img src="' + RAW_BASE + u.grafico + '?t=' + Date.now() + '" ' +
-              'style="max-width:240px;margin-top:6px;border-radius:6px;display:block;" ' +
-              'onerror="this.style.display=\'none\'">';
-          }
+          var popup = armarPopup(u);
+          var icono = pinIcono(u.totalMm);
 
           if (markers[key]) {
-            // Ya existe el pin: solo se actualiza el popup, no se duplica el marcador.
+            // Ya existe el pin: solo se actualiza el popup y el color, no se duplica el marcador.
             markers[key].setPopupContent(popup);
+            markers[key].setIcon(icono);
           } else {
-            markers[key] = L.marker([u.lat, u.lon]).addTo(map).bindPopup(popup, { maxWidth: 260 });
+            markers[key] = L.marker([u.lat, u.lon], { icon: icono }).bindPopup(popup, { maxWidth: 260 });
+            clusterGroup.addLayer(markers[key]);
           }
           bounds.push([u.lat, u.lon]);
         });
@@ -65,8 +178,9 @@
         // Si alguien fue borrado del todo (perfil eliminado), se le saca el pin.
         Object.keys(markers).forEach(function(key) {
           if (!vistos[key]) {
-            map.removeLayer(markers[key]);
+            clusterGroup.removeLayer(markers[key]);
             delete markers[key];
+            delete datosUsuarios[key];
           }
         });
 
@@ -82,6 +196,67 @@
   setInterval(cargarUsuarios, 8000); // se refresca sola cada 8 segundos
   document.addEventListener('visibilitychange', function() {
     if (!document.hidden) cargarUsuarios(); // y al volver a primer plano
+  });
+
+  // ── Lightbox del grafico ──────────────────────────────────────────────
+  function abrirLightbox(url) {
+    document.getElementById('lightboxImg').src = url;
+    document.getElementById('lightbox').style.display = 'flex';
+  }
+  function cerrarLightbox() {
+    document.getElementById('lightbox').style.display = 'none';
+  }
+  document.getElementById('lightbox').addEventListener('click', function(e) {
+    if (e.target.id === 'lightbox') cerrarLightbox();
+  });
+
+  // ── Compartir estacion por WhatsApp/Telegram ──────────────────────────
+  function compartirEstacion(nombre, totalMm) {
+    var texto = 'Pluviometro de ' + nombre + ': ' + totalMm + ' mm acumulados. Mira la red completa:';
+    var url = window.location.href.split('?')[0];
+    if (tg && tg.openTelegramLink) {
+      tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(texto));
+    } else {
+      window.open('https://wa.me/?text=' + encodeURIComponent(texto + ' ' + url), '_blank');
+    }
+  }
+
+  // ── Buscador de estacion por nombre ───────────────────────────────────
+  var inputBuscar = document.getElementById('inputBuscar');
+  var divResultados = document.getElementById('resultados');
+  inputBuscar.addEventListener('input', function() {
+    var q = inputBuscar.value.trim().toLowerCase();
+    divResultados.innerHTML = '';
+    if (!q) { divResultados.style.display = 'none'; return; }
+
+    var coincidencias = Object.keys(datosUsuarios).filter(function(key) {
+      return datosUsuarios[key].nombre.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+
+    if (coincidencias.length === 0) { divResultados.style.display = 'none'; return; }
+
+    coincidencias.forEach(function(key) {
+      var u = datosUsuarios[key];
+      var item = document.createElement('div');
+      item.textContent = u.nombre + ' (' + u.totalMm + ' mm)';
+      item.onclick = function() {
+        divResultados.style.display = 'none';
+        inputBuscar.value = '';
+        map.setView([u.lat, u.lon], 14);
+        clusterGroup.zoomToShowLayer(markers[key], function() { markers[key].openPopup(); });
+      };
+      divResultados.appendChild(item);
+    });
+    divResultados.style.display = 'block';
+  });
+
+  // ── Boton "Cargar mi registro": manda el pedido de vuelta al bot ────────
+  document.getElementById('btnCargar').addEventListener('click', function() {
+    if (tg && tg.sendData) {
+      tg.sendData('cargar_lluvia'); // Telegram cierra el Mini App y le llega al bot como web_app_data
+    } else {
+      alert('Abri el mapa desde Telegram para poder cargar un registro.');
+    }
   });
 </script>
 </body>
