@@ -26,13 +26,6 @@
   #resultados div { padding: 8px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
   #resultados div:last-child { border-bottom: none; }
 
-  /* ── Boton flotante "Cargar registro" ───────────────────────────────── */
-  #btnCargar {
-    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-    z-index: 1000; background: #2f8ca8; color: white; border: none; border-radius: 24px;
-    padding: 12px 22px; font-size: 15px; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-  }
-
   /* ── Lightbox del grafico ─────────────────────────────────────────── */
   #lightbox {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
@@ -68,7 +61,6 @@
   <div id="resultados"></div>
 </div>
 <div id="map"></div>
-<button id="btnCargar">🌧 Cargar mi registro</button>
 <div id="lightbox"><span class="cerrar" onclick="cerrarLightbox()">×</span><img id="lightboxImg" src=""></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -276,14 +268,6 @@
     divResultados.style.display = 'block';
   });
 
-  // ── Boton "Cargar mi registro": manda el pedido de vuelta al bot ────────
-  document.getElementById('btnCargar').addEventListener('click', function() {
-    if (tg && tg.sendData) {
-      tg.sendData('cargar_lluvia'); // Telegram cierra el Mini App y le llega al bot como web_app_data
-    } else {
-      alert('Abri el mapa desde Telegram para poder cargar un registro.');
-    }
-  });
 </script>
 </body>
 </html>
